@@ -1,0 +1,156 @@
+;*************************************************************
+;* FILE: R6502Test.a65
+;*************************************************************
+;* Description:
+;*  Simple test for Rockwell 65C02 hardware multiply
+;*
+;*  The current version assembles with the ca65 assembler included with the
+;*  cc65 6502 C compiler package.
+;*
+;* Author: James Diffendaffer
+;*   Copyright(c) May 11, 2019
+;*
+;* Version Date/Time:
+;*   Mar 2, 2015 - 12:00 AM
+;* 
+;* Version update info:
+;************************************************************* 
+
+
+
+;************************************************************* 
+;* Set build conditions here.
+;*
+;* Nothing else *should* need to be modified if I've done this right
+;* The code does currently assume songs follow the code but that will eventually change
+;************************************************************* 
+.DEFINE	UNITTEST	1		; set to non-zero value to enable the stand along unit test code, otherwise build to link to external program
+.DEFINE USE_C02		0		; set to use 65C02 instructions. 1 = standard 65C02 or above, 2 = Rockwell/WDC 65C02 or above
+.DEFINE USE_CMD		1		; set to non-zero value to use additional commands in the song data
+.DEFINE USE_NTSC	1		; set to non-zero value to use NTSC VIA Timer settings, otherwise PAL
+.DEFINE BIGSONGS	1		; set to non-zero value if songs will cross a 256 byte memory page. 
+.DEFINE	TWO_VIAS	1		; set to non-zero value if songs will use 2 AY chips
+.DEFINE	DOSHEADER	0		; set to non-zero to attach a DOS 3.3 header at the start of the file (used by a2tools)
+.DEFINE USE_TIMER	0		; set to non-zero to include code for a free running 16 bit timer
+
+.DEFINE PAGEZERO	$00EB	; set the org address for page zero variables here
+;.DEFINE PAGEZERO	$0090	; set the org address for page zero variables here
+.IF UNITTEST
+.DEFINE STARTCODE	$8000	; set the org address for the unit test code section here
+.ELSE
+.DEFINE	STARTCODE	$8000	; PUT YOUR START ADDRESS HERE AND SET UNIT TEST TO 0
+.ENDIF
+;************************************************************* 
+
+
+
+; Apple specific hardware and ROM call definitions.  Used by the unit test code
+.DEFINE	KEYBOARD	$C000	; address of Apple II keyboard
+.DEFINE STROBE		$C010	; keyboard strobe
+.DEFINE	COUT1		$FDF0	; ROM routine to print a character
+.DEFINE	CROUT		$FD8E	; ROM routine to print a return
+.DEFINE	PRBYTE		$FDDA	; ROM routine to output A as 2 digit HEX
+.DEFINE	IOSAVE		$FF4A	; save all registers
+.DEFINE	IOREST		$FF3F	; restore all registers
+.DEFINE	IRQloc		$03FE	; Apple II IRQ handler address
+
+
+; VIA register definitions for the first Mockingboard 6522
+.DEFINE	VIAIORB		$C400	; IO Register B
+.DEFINE	VIAIORA		$C401	; IO Register A
+.DEFINE VIADDRB		$C402	; Data Direction Register B
+.DEFINE VIADDRA 	$C403	; Data Direction Register A
+.DEFINE	VIA_T1C		$C404	; Read/Write Counter Low-High T1
+.DEFINE	VIA_T1L		$C406	; Read/Write Latch Low-High T1
+.DEFINE	VIA_ACR		$C40B	; Auxiliary Control Register
+.DEFINE	VIA_PCR		$C40C	; Peripheral Control Register;
+.DEFINE VIA_IFR		$C40D	; Interrupt Flag Register
+.DEFINE	VIA_IER 	$C40E	; Interrupt Enable Register
+
+
+; VIA register definitions for the second Mockingboard 6522
+.DEFINE	VIA2IORB	$C480	; IO Register B
+.DEFINE	VIA2IORA	$C481	; IO Register A
+.DEFINE VIA2DDRB	$C482	; Data Direction Register B
+.DEFINE VIA2DDRA	$C483	; Data Direction Register A
+.DEFINE	VIA2_T1C	$C484	; Read/Write Counter Low-High T1
+.DEFINE	VIA2_T1L	$C486	; Read/Write Latch Low-High T1
+.DEFINE	VIA2_ACR	$C48B	; Auxiliary Control Register
+.DEFINE	VIA2_PCR	$C48C	; Peripheral Control Register;
+.DEFINE VIA2_IFR	$C48D	; Interrupt Flag Register
+.DEFINE	VIA2_IER 	$C48E	; Interrupt Enable Register
+
+.DEFINE MUL	.byt $02		; Rockwell 65C02 opcode for MULtiply instruction (A * Y)
+
+; VIA timer settings
+.IF	USE_NTSC
+.DEFINE	VBLVIA	$40FF		; VIA Timer Latch, settings matching NTSC 60Hz (from mockingboard demo)
+;.DEFINE	VBLVIA	$4100		; VIA Timer Latch, settings matching NTSC 60Hz
+.ELSE
+.DEFINE	VBLVIA	$4E00		; VIA Timer Latch, settings matching PAL 50Hz
+.ENDIF
+
+
+;**************************************************************
+;	.BSS	
+
+.ZEROPAGE				; page zero variables
+
+; The zeropage address should be set by the linker
+;	.org	PAGEZERO	; our page zero start address
+
+.CODE
+
+.IF DOSHEADER
+;**************************************************************
+;* DOS 3.3 header
+;**************************************************************
+;*
+;**************************************************************
+	.org	STARTCODE-4
+	.word	STARTCODE					; Program Start Address			
+	.word	DATAEND-STARTCODE			; Program Length
+;**************************************************************
+.ENDIF
+
+	.org	STARTCODE
+
+.IF UNITTEST
+;**************************************************************
+;* main
+;**************************************************************
+;* Description:
+;*   This is the main routine for the unit test code.
+;*   It calls routines to initialize the hardware/software,
+;*   plays the song, performs a busy loop until the song is done,
+;*   and then calls the stopsong to disable playing.
+;**************************************************************
+_main:
+	jsr	IOSAVE				; save registers
+	jsr	CROUT				; output a carriage return
+
+;	lda	'$'
+;	jsr	COUT1				; output A as character
+
+	; test multiply 2 x 2
+	lda	#2
+	tay
+	.byt	$02				; multiply A * Y
+
+	sta	end
+	sty	end+1
+	
+;	jsr	PRBYTE				; output A as HEX
+;	tya						; put y in A
+;	jsr	PRBYTE
+;	jsr	CROUT				; output a carriage return
+
+exittest:
+	jmp	IOREST				;restore registers and return
+end:
+	.byt 00,00
+	
+;**************************************************************
+.ENDIF
+
+.end
